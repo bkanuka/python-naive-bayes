@@ -1,5 +1,7 @@
+from __future__ import division
 import re
 import string
+import numpy as np
 
 def remove_punctuation(s):
     """See: http://stackoverflow.com/a/266162
@@ -18,11 +20,7 @@ def count_words(words):
         wc[word] = wc.get(word, 0.0) + 1.0
     return wc
 
-s = "Hello my name, is Greg. My favorite food is pizza."
-count_words(tokenize(s))
-{'favorite': 1.0, 'food': 1.0, 'greg': 1.0, 'hello': 1.0, 'is': 2.0, 'my': 2.0, 'name': 1.0, 'pizza': 1.0}
-
-from sh import find
+import glob
 
 # setup some structures to store our data
 vocab = {}
@@ -30,12 +28,13 @@ word_counts = {
     "crypto": {},
     "dino": {}
 }
-priors = {
+prior_count = {
     "crypto": 0.,
     "dino": 0.
 }
 docs = []
-for f in find("sample-data"):
+
+for f in glob.glob("./sample-data/*/*.txt"):
     f = f.strip()
     if not f.endswith(".txt"):
         # skip non .txt files
@@ -46,7 +45,7 @@ for f in find("sample-data"):
         category = "dino"
     docs.append((category, f))
     # ok time to start counting stuff...
-    priors[category] += 1
+    prior_count[category] += 1
     text = open(f).read()
     words = tokenize(text)
     counts = count_words(words)
@@ -61,31 +60,45 @@ for f in find("sample-data"):
 
 
 new_doc = open("examples/Allosaurus.txt").read()
-new_doc = open("examples/Python.txt").read()
-new_doc = open("examples/Yeti.txt").read()
+#new_doc = open("examples/Python.txt").read()
+#new_doc = open("examples/Yeti.txt").read()
+
 words = tokenize(new_doc)
 counts = count_words(words)
 
-import math
 
-prior_dino = (priors["dino"] / sum(priors.values()))
-prior_crypto = (priors["crypto"] / sum(priors.values()))
+# P(dino)
+prior_dino = (prior_count["dino"] / (prior_count["dino"] + prior_count["crypto"]))
+# P(crypto)
+prior_crypto = (prior_count["crypto"] / (prior_count["dino"] + prior_count["crypto"]))
 
-log_prob_crypto = 0.0
-log_prob_dino = 0.0
+print("Prior(dino)  :", prior_dino)
+print("Prior(crypto):", prior_crypto)
+
+log_score_dino = np.log(prior_dino)
+log_score_crypto = np.log(prior_crypto)
+
 for w, cnt in list(counts.items()):
     # skip words that we haven't seen before, or words less than 3 letters long
     if w not in vocab or len(w) <= 3:
         continue
 
-    p_word = vocab[w] / sum(vocab.values())
-    p_w_given_dino = word_counts["dino"].get(w, 0.0) / sum(word_counts["dino"].values())
-    p_w_given_crypto = word_counts["crypto"].get(w, 0.0) / sum(word_counts["crypto"].values())
+    # number of times this word is in all dino articles
+    # over count of all words in all dino articles
+    p_w_given_dino = (word_counts["dino"].get(w, 0.0) + 1.0) / \
+            sum(np.array(word_counts["dino"].values()) + 1.0)
 
-    if p_w_given_dino > 0:
-        log_prob_dino += math.log(cnt * p_w_given_dino / p_word)
-    if p_w_given_crypto > 0:
-        log_prob_crypto += math.log(cnt * p_w_given_crypto / p_word)
+    p_w_given_crypto = (word_counts["crypto"].get(w, 0.0) + 1.0) / \
+            sum(np.array(word_counts["crypto"].values()) + 1.0)
 
-print("Score(dino)  :", math.exp(log_prob_dino + math.log(prior_dino)))
-print("Score(crypto):", math.exp(log_prob_crypto + math.log(prior_crypto)))
+    log_score_dino += (cnt * np.log(p_w_given_dino))
+    log_score_crypto += (cnt * np.log(p_w_given_crypto))
+
+print("LogScore(dino)  :", log_score_dino)
+print("LogScore(crypto):", log_score_crypto)
+
+c1 = log_score_dino - log_score_crypto
+c2 = log_score_crypto - log_score_dino
+
+print("P(dino)  :", 1/(np.exp(c2) + 1))
+print("P(crypto):", 1/(np.exp(c1) + 1))
